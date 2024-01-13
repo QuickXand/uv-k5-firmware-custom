@@ -32,6 +32,10 @@
 	#define MIN(a, b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
 #endif
 
+#ifndef SWAP
+	#define SWAP(a, b) ({ __typeof__ (a) _c = (a);  a = b; b = _c; })
+#endif
+
 #define IS_MR_CHANNEL(x)       ((x) <= MR_CHANNEL_LAST)
 #define IS_FREQ_CHANNEL(x)     ((x) >= FREQ_CHANNEL_FIRST && (x) <= FREQ_CHANNEL_LAST)
 #define IS_VALID_CHANNEL(x)    ((x) < LAST_CHANNEL)
@@ -171,7 +175,7 @@ extern uint16_t              gEEPROM_RSSI_CALIB[7][4];
 extern uint16_t              gEEPROM_1F8A;
 extern uint16_t              gEEPROM_1F8C;
 
-typedef union { 
+typedef union {
     struct {
         uint8_t
             band : 4,
@@ -203,9 +207,6 @@ extern volatile bool         gTxTimeoutReached;
 
 extern volatile uint16_t     gTailNoteEliminationCountdown_10ms;
 
-#ifdef ENABLE_FMRADIO
-	extern volatile uint16_t gFmPlayCountdown_10ms;
-#endif
 #ifdef ENABLE_NOAA
 	extern volatile uint16_t gNOAA_Countdown_10ms;
 #endif

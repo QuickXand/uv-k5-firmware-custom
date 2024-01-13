@@ -3,12 +3,6 @@
 # 0 = disable
 # 1 = enable
 
-# ---- COMPILER/LINKER OPTIONS ----
-ENABLE_CLANG                  ?= 0
-ENABLE_SWD                    ?= 0
-ENABLE_OVERLAY                ?= 0
-ENABLE_LTO                    ?= 1
-
 # ---- STOCK QUANSHENG FERATURES ----
 ENABLE_UART                   ?= 1
 ENABLE_AIRCOPY                ?= 0
@@ -25,6 +19,7 @@ ENABLE_FLASHLIGHT             ?= 1
 # ---- CUSTOM MODS ----
 ENABLE_BIG_FREQ               ?= 1
 ENABLE_SMALL_BOLD             ?= 1
+ENABLE_CUSTOM_MENU_LAYOUT     ?= 1
 ENABLE_KEEP_MEM_NAME          ?= 1
 ENABLE_WIDE_RX                ?= 1
 ENABLE_TX_WHEN_AM             ?= 0
@@ -49,6 +44,13 @@ ENABLE_SCAN_RANGES            ?= 1
 # ---- DEBUGGING ----
 ENABLE_AM_FIX_SHOW_DATA       ?= 0
 ENABLE_AGC_SHOW_DATA          ?= 0
+ENABLE_UART_RW_BK_REGS        ?= 0
+
+# ---- COMPILER/LINKER OPTIONS ----
+ENABLE_CLANG                  ?= 0
+ENABLE_SWD                    ?= 0
+ENABLE_OVERLAY                ?= 0
+ENABLE_LTO                    ?= 1
 
 #############################################################
 
@@ -167,24 +169,18 @@ OBJS += ui/welcome.o
 OBJS += version.o
 OBJS += main.o
 
-ifeq ($(OS), Windows_NT)
-	TOP := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
-else
-	TOP := $(shell pwd)
-endif
-
-ifdef OS # windows
-   RM = del /Q
-   FixPath = $(subst /,\,$1)
-   WHERE = where
-   NULL_OUTPUT = nul
+ifeq ($(OS), Windows_NT) # windows
+    TOP := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+    RM = del /Q
+    FixPath = $(subst /,\,$1)
+    WHERE = where
+    NULL_OUTPUT = nul
 else # unix
-   ifeq ($(shell uname), Linux)
-      RM = rm -f
-      FixPath = $1
-	  WHERE = which
-	  NULL_OUTPUT = /dev/null
-   endif
+    TOP := $(shell pwd)
+    RM = rm -f
+    FixPath = $1
+    WHERE = which
+    NULL_OUTPUT = /dev/null
 endif
 
 AS = arm-none-eabi-gcc
@@ -212,6 +208,11 @@ ifneq (, $(shell $(WHERE) git))
 	ifeq (, $(VERSION_STRING))
     	VERSION_STRING := $(shell git rev-parse --short HEAD)
 	endif
+endif
+# If there is still no VERSION_STRING we need to make one.
+# It is needed for the firmware packing script
+ifeq (, $(VERSION_STRING))
+	VERSION_STRING := NOGIT
 endif
 #VERSION_STRING := 230930b
 
@@ -370,6 +371,12 @@ endif
 ifeq ($(ENABLE_FLASHLIGHT),1)
 	CFLAGS  += -DENABLE_FLASHLIGHT
 endif
+ifeq ($(ENABLE_UART_RW_BK_REGS),1)
+	CFLAGS  += -DENABLE_UART_RW_BK_REGS
+endif
+ifeq ($(ENABLE_CUSTOM_MENU_LAYOUT),1)
+	CFLAGS  += -DENABLE_CUSTOM_MENU_LAYOUT
+endif
 
 LDFLAGS =
 LDFLAGS += -z noexecstack -mcpu=cortex-m0 -nostartfiles -Wl,-T,firmware.ld -Wl,--gc-sections
@@ -447,3 +454,6 @@ bsp/dp32g030/%.h: hardware/dp32g030/%.def
 
 clean:
 	$(RM) $(call FixPath, $(TARGET).bin $(TARGET).packed.bin $(TARGET) $(OBJS) $(DEPS))
+
+doxygen:
+	doxygen

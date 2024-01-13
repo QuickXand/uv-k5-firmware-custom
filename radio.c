@@ -14,6 +14,7 @@
  *     limitations under the License.
  */
 
+#include "driver/bk4819-regs.h"
 #include <string.h>
 
 #include "am_fix.h"
@@ -55,69 +56,41 @@ const char gModulationStr[MODULATION_UKNOWN][4] = {
 
 
 
-bool RADIO_CheckValidChannel(uint16_t Channel, bool bCheckScanList, uint8_t VFO)
-{	// return true if the channel appears valid
-
-	ChannelAttributes_t att;
-	uint8_t PriorityCh1;
-	uint8_t PriorityCh2;
-
-	if (!IS_MR_CHANNEL(Channel))
+bool RADIO_CheckValidChannel(uint16_t channel, bool checkScanList, uint8_t scanList)
+{
+	// return true if the channel appears valid
+	if (!IS_MR_CHANNEL(channel))
 		return false;
 
-	att = gMR_ChannelAttributes[Channel];
+	const ChannelAttributes_t att = gMR_ChannelAttributes[channel];
 
 	if (att.band > BAND7_470MHz)
 		return false;
 
-	if (bCheckScanList) {
-		switch (VFO) {
-			case 0:
-				if (!att.scanlist1)
-					return false;
+	if (!checkScanList || scanList > 1)
+		return true;
 
-				PriorityCh1 = gEeprom.SCANLIST_PRIORITY_CH1[0];
-				PriorityCh2 = gEeprom.SCANLIST_PRIORITY_CH2[0];
-				break;
+	if (scanList ? !att.scanlist2 : !att.scanlist1)
+		return false;
 
-			case 1:
-				if (!att.scanlist2)
-					return false;
+	const uint8_t PriorityCh1 = gEeprom.SCANLIST_PRIORITY_CH1[scanList];
+	const uint8_t PriorityCh2 = gEeprom.SCANLIST_PRIORITY_CH2[scanList];
 
-				PriorityCh1 = gEeprom.SCANLIST_PRIORITY_CH1[1];
-				PriorityCh2 = gEeprom.SCANLIST_PRIORITY_CH2[1];
-				break;
-
-			default:
-				return true;
-		}
-
-		if (PriorityCh1 == Channel)
-			return false;
-
-		if (PriorityCh2 == Channel)
-			return false;
-	}
-
-	return true;
+	return PriorityCh1 != channel && PriorityCh2 != channel;
 }
 
 uint8_t RADIO_FindNextChannel(uint8_t Channel, int8_t Direction, bool bCheckScanList, uint8_t VFO)
 {
-	unsigned int i;
-
-	for (i = 0; IS_MR_CHANNEL(i); i++)
-	{
-		if (Channel == 0xFF)
+	for (unsigned int i = 0; IS_MR_CHANNEL(i); i++, Channel += Direction) {
+		if (Channel == 0xFF) {
 			Channel = MR_CHANNEL_LAST;
-		else
-		if (!IS_MR_CHANNEL(Channel))
+		} else if (!IS_MR_CHANNEL(Channel)) {
 			Channel = MR_CHANNEL_FIRST;
+		}
 
-		if (RADIO_CheckValidChannel(Channel, bCheckScanList, VFO))
+		if (RADIO_CheckValidChannel(Channel, bCheckScanList, VFO)) {
 			return Channel;
-
-		Channel += Direction;
+		}
 	}
 
 	return 0xFF;
@@ -165,7 +138,7 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
 
 	if (IS_VALID_CHANNEL(channel)) {
 #ifdef ENABLE_NOAA
-		if (channel >= NOAA_CHANNEL_FIRST)
+		if (IS_NOAA_CHANNEL(channel))
 		{
 			RADIO_InitInfo(pVfo, gEeprom.ScreenChannel[VFO], NoaaFrequencyTable[channel - NOAA_CHANNEL_FIRST]);
 
@@ -443,56 +416,37 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 		EEPROM_ReadBuffer(Base + 0x40, &pInfo->SquelchCloseGlitchThresh, 1);  //  90    90
 		EEPROM_ReadBuffer(Base + 0x50, &pInfo->SquelchOpenGlitchThresh,  1);  // 100   100
 
-		uint16_t rssi_open    = pInfo->SquelchOpenRSSIThresh;
-		uint16_t rssi_close   = pInfo->SquelchCloseRSSIThresh;
+
 		uint16_t noise_open   = pInfo->SquelchOpenNoiseThresh;
 		uint16_t noise_close  = pInfo->SquelchCloseNoiseThresh;
+
+#if ENABLE_SQUELCH_MORE_SENSITIVE
+		uint16_t rssi_open    = pInfo->SquelchOpenRSSIThresh;
+		uint16_t rssi_close   = pInfo->SquelchCloseRSSIThresh;
 		uint16_t glitch_open  = pInfo->SquelchOpenGlitchThresh;
 		uint16_t glitch_close = pInfo->SquelchCloseGlitchThresh;
-
-		#if ENABLE_SQUELCH_MORE_SENSITIVE
-			// make squelch a little more sensitive
-			//
-			// getting the best setting here is still experimental, bare with me
-			//
-			// note that 'noise' and 'glitch' values are inverted compared to 'rssi' values
-
-			#if 0
-				rssi_open   = (rssi_open   * 8) / 9;
-				noise_open  = (noise_open  * 9) / 8;
-				glitch_open = (glitch_open * 9) / 8;
-			#else
-				// even more sensitive .. use when RX bandwidths are fixed (no weak signal auto adjust)
-				rssi_open   = (rssi_open   * 1) / 2;
-				noise_open  = (noise_open  * 2) / 1;
-				glitch_open = (glitch_open * 2) / 1;
-			#endif
-
-		#else
-			// more sensitive .. use when RX bandwidths are fixed (no weak signal auto adjust)
-			rssi_open   = (rssi_open   * 3) / 4;
-			noise_open  = (noise_open  * 4) / 3;
-			glitch_open = (glitch_open * 4) / 3;
-		#endif
-
-		rssi_close   = (rssi_open   *  9) / 10;
-		noise_close  = (noise_open  * 10) / 9;
-		glitch_close = (glitch_open * 10) / 9;
+		// make squelch more sensitive
+		// note that 'noise' and 'glitch' values are inverted compared to 'rssi' values
+		rssi_open   = (rssi_open   * 1) / 2;
+		noise_open  = (noise_open  * 2) / 1;
+		glitch_open = (glitch_open * 2) / 1;
 
 		// ensure the 'close' threshold is lower than the 'open' threshold
-		if (rssi_close   == rssi_open   && rssi_close   >= 2)
+		if (rssi_close == rssi_open && rssi_close >= 2)
 			rssi_close -= 2;
-		if (noise_close  == noise_open  && noise_close  <= 125)
+		if (noise_close == noise_open && noise_close  <= 125)
 			noise_close += 2;
 		if (glitch_close == glitch_open && glitch_close <= 253)
 			glitch_close += 2;
 
 		pInfo->SquelchOpenRSSIThresh    = (rssi_open    > 255) ? 255 : rssi_open;
 		pInfo->SquelchCloseRSSIThresh   = (rssi_close   > 255) ? 255 : rssi_close;
-		pInfo->SquelchOpenNoiseThresh   = (noise_open   > 127) ? 127 : noise_open;
-		pInfo->SquelchCloseNoiseThresh  = (noise_close  > 127) ? 127 : noise_close;
 		pInfo->SquelchOpenGlitchThresh  = (glitch_open  > 255) ? 255 : glitch_open;
 		pInfo->SquelchCloseGlitchThresh = (glitch_close > 255) ? 255 : glitch_close;
+#endif
+
+		pInfo->SquelchOpenNoiseThresh   = (noise_open   > 127) ? 127 : noise_open;
+		pInfo->SquelchCloseNoiseThresh  = (noise_close  > 127) ? 127 : noise_close;
 	}
 
 	// *******************************
@@ -723,53 +677,45 @@ void RADIO_SetupRegisters(bool switchToForeground)
 		}
 	#endif
 
-	#ifdef ENABLE_VOX
-		#ifdef ENABLE_NOAA
-			#ifdef ENABLE_FMRADIO
-				if (gEeprom.VOX_SWITCH && !gFmRadioMode && !IS_NOAA_CHANNEL(gCurrentVfo->CHANNEL_SAVE) && gCurrentVfo->Modulation == MODULATION_FM)
-			#else
-				if (gEeprom.VOX_SWITCH && !IS_NOAA_CHANNEL(gCurrentVfo->CHANNEL_SAVE) && gCurrentVfo->Modulation == MODULATION_FM)
-			#endif
-		#else
-			#ifdef ENABLE_FMRADIO
-				if (gEeprom.VOX_SWITCH && !gFmRadioMode && gCurrentVfo->Modulation == MODULATION_FM)
-			#else
-				if (gEeprom.VOX_SWITCH && gCurrentVfo->Modulation == MODULATION_FM)
-			#endif
-		#endif
-		{
-			BK4819_EnableVox(gEeprom.VOX1_THRESHOLD, gEeprom.VOX0_THRESHOLD);
-			InterruptMask |= BK4819_REG_3F_VOX_FOUND | BK4819_REG_3F_VOX_LOST;
-		}
-		else
-	#endif
+#ifdef ENABLE_VOX
+	if (gEeprom.VOX_SWITCH  && gCurrentVfo->Modulation == MODULATION_FM
+#ifdef ENABLE_NOAA
+		&& !IS_NOAA_CHANNEL(gCurrentVfo->CHANNEL_SAVE)
+#endif
+#ifdef ENABLE_FMRADIO
+		&& !gFmRadioMode
+#endif
+	){
+		BK4819_EnableVox(gEeprom.VOX1_THRESHOLD, gEeprom.VOX0_THRESHOLD);
+		InterruptMask |= BK4819_REG_3F_VOX_FOUND | BK4819_REG_3F_VOX_LOST;
+	}
+	else
+#endif
+	{
 		BK4819_DisableVox();
+	}
 
 	// RX expander
 	BK4819_SetCompander((gRxVfo->Modulation == MODULATION_FM && gRxVfo->Compander >= 2) ? gRxVfo->Compander : 0);
 
-	#if 0
-		if (!gRxVfo->DTMF_DECODING_ENABLE && !gSetting_KILLED)
-		{
-			BK4819_DisableDTMF();
-		}
-		else
-		{
-			BK4819_EnableDTMF();
-			InterruptMask |= BK4819_REG_3F_DTMF_5TONE_FOUND;
-		}
-	#else
-		if (gCurrentFunction != FUNCTION_TRANSMIT)
-		{
-			BK4819_DisableDTMF();
-			BK4819_EnableDTMF();
-			InterruptMask |= BK4819_REG_3F_DTMF_5TONE_FOUND;
-		}
-		else
-		{
-			BK4819_DisableDTMF();
-		}
-	#endif
+#if 0
+	if (!gRxVfo->DTMF_DECODING_ENABLE && !gSetting_KILLED)
+	{
+		BK4819_DisableDTMF();
+	}
+	else
+	{
+		BK4819_EnableDTMF();
+		InterruptMask |= BK4819_REG_3F_DTMF_5TONE_FOUND;
+	}
+#else
+	BK4819_DisableDTMF();
+
+	if (gCurrentFunction != FUNCTION_TRANSMIT) {
+		BK4819_EnableDTMF();
+		InterruptMask |= BK4819_REG_3F_DTMF_5TONE_FOUND;
+	}
+#endif
 
 	RADIO_SetupAGC(gRxVfo->Modulation == MODULATION_AM, false);
 
@@ -812,7 +758,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
 				return;
 			}
 
-			if (gRxVfo->CHANNEL_SAVE >= NOAA_CHANNEL_FIRST)
+			if (IS_NOAA_CHANNEL(gRxVfo->CHANNEL_SAVE))
 			{
 				gIsNoaaMode          = true;
 				gNoaaChannel         = gRxVfo->CHANNEL_SAVE - NOAA_CHANNEL_FIRST;
@@ -938,7 +884,7 @@ void RADIO_SetupAGC(bool listeningAM, bool disable)
 		BK4819_InitAGC(false);
 	}
 	else {
-#ifdef ENABLE_AM_FIX		
+#ifdef ENABLE_AM_FIX
 		if(gSetting_AM_fix) { // if AM fix active lock AGC so AM-fix can do it's job
 			BK4819_SetAGC(0);
 			AM_fix_enable(!disable);
@@ -1042,15 +988,12 @@ void RADIO_PrepareTX(void)
 #ifdef ENABLE_DTMF_CALLING
 	if (gDTMF_ReplyState == DTMF_REPLY_ANI)
 	{
-		if (gDTMF_CallMode == DTMF_CALL_MODE_DTMF)
-		{
-			gDTMF_IsTx = true;
+		gDTMF_IsTx = gDTMF_CallMode == DTMF_CALL_MODE_DTMF;
+
+		if (gDTMF_IsTx) {
 			gDTMF_CallState = DTMF_CALL_STATE_NONE;
 			gDTMF_TxStopCountdown_500ms = DTMF_txstop_countdown_500ms;
-		}
-		else
-		{
-			gDTMF_IsTx = false;
+		} else {
 			gDTMF_CallState = DTMF_CALL_STATE_CALL_OUT;
 		}
 	}
@@ -1096,6 +1039,16 @@ void RADIO_EnableCxCSS(void)
 	SYSTEM_DelayMs(200);
 }
 
+void RADIO_SendEndOfTransmission(void)
+{
+	BK4819_PlayRoger();
+	DTMF_SendEndOfTransmission();
+
+	// send the CTCSS/DCS tail tone - allows the receivers to mute the usual FM squelch tail/crash
+	RADIO_EnableCxCSS();
+	RADIO_SetupRegisters(false);
+}
+
 void RADIO_PrepareCssTX(void)
 {
 	RADIO_PrepareTX();
@@ -1104,46 +1057,4 @@ void RADIO_PrepareCssTX(void)
 
 	RADIO_EnableCxCSS();
 	RADIO_SetupRegisters(true);
-}
-
-void RADIO_SendEndOfTransmission(void)
-{
-	if (gEeprom.ROGER == ROGER_MODE_ROGER)
-		BK4819_PlayRoger();
-	else
-	if (gEeprom.ROGER == ROGER_MODE_MDC)
-		BK4819_PlayRogerMDC();
-
-	if (gCurrentVfo->DTMF_PTT_ID_TX_MODE == PTT_ID_APOLLO)
-		BK4819_PlaySingleTone(2475, 250, 28, gEeprom.DTMF_SIDE_TONE);
-
-	if (
-#ifdef ENABLE_DTMF_CALLING
-		gDTMF_CallState == DTMF_CALL_STATE_NONE &&
-#endif
-	   (gCurrentVfo->DTMF_PTT_ID_TX_MODE == PTT_ID_TX_DOWN ||
-	    gCurrentVfo->DTMF_PTT_ID_TX_MODE == PTT_ID_BOTH))
-	{	// end-of-tx
-		if (gEeprom.DTMF_SIDE_TONE)
-		{
-			AUDIO_AudioPathOn();
-			gEnableSpeaker = true;
-			SYSTEM_DelayMs(60);
-		}
-
-		BK4819_EnterDTMF_TX(gEeprom.DTMF_SIDE_TONE);
-
-		BK4819_PlayDTMFString(
-				gEeprom.DTMF_DOWN_CODE,
-				0,
-				gEeprom.DTMF_FIRST_CODE_PERSIST_TIME,
-				gEeprom.DTMF_HASH_CODE_PERSIST_TIME,
-				gEeprom.DTMF_CODE_PERSIST_TIME,
-				gEeprom.DTMF_CODE_INTERVAL_TIME);
-
-		AUDIO_AudioPathOff();
-		gEnableSpeaker = false;
-	}
-
-	BK4819_ExitDTMF_TX(true);
 }
